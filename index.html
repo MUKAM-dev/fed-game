@@ -1327,19 +1327,13 @@ async function resolveRound(state) {
   // Save snapshot of trades for capital flow display
   state.resolvedTrades = { ...trades };
 
-  // Calculate total PLN invested per asset this round
-  const totalByAsset = {};
-  let grandTotal = 0;
-  ASSETS.forEach(a => { totalByAsset[a.id] = trades[a.id] || 0; grandTotal += totalByAsset[a.id]; });
-
-  // New prices
   const newPrices = { ...state.prices };
   ASSETS.forEach(a => {
-    const share = grandTotal > 0 ? totalByAsset[a.id] / grandTotal : 0.25;
-    const demandMult = 0.85 + (share * 1.2);
+    // Fed modifier is the dominant force (80-90% of movement)
     const fedMult = roundData.modifiers[a.id];
-    const noise = 0.95 + Math.random() * 0.10;
-    newPrices[a.id] = Math.round(state.prices[a.id] * demandMult * fedMult * noise);
+    // Small random noise ±4% — markets are never perfectly predictable
+    const noise = 0.96 + Math.random() * 0.08;
+    newPrices[a.id] = Math.round(state.prices[a.id] * fedMult * noise);
     newPrices[a.id] = Math.max(5, newPrices[a.id]);
   });
 
@@ -1709,19 +1703,22 @@ function showEndScreen(state) {
 
   ROUNDS.forEach((r, i) => {
     if (i >= (state.round || 5)) return;
-    const prevP = hist[i];
-    const afterP = hist[i + 1];
+    // hist[0] = starting prices, hist[1] = after round 1, hist[i+1] = after round i+1
+    const prevP = hist[i];       // prices before this round
+    const afterP = hist[i + 1];  // prices after this round resolved
     const card = document.createElement('div');
     card.className = 'recap-card';
 
     let pricesHtml = '';
-    if (afterP) {
+    if (prevP && afterP) {
       ASSETS.forEach(a => {
         const before = prevP[a.id];
         const after = afterP[a.id];
-        const pct = ((after - before) / before * 100).toFixed(1);
-        const dir = after > before ? 'up' : after < before ? 'down' : 'flat';
-        pricesHtml += `<span class="recap-price-badge ${dir}">${a.id}: ${dir==='up'?'▲':'▼'} ${Math.abs(pct)}%</span>`;
+        if (!before || !after) return;
+        const pct = ((after - before) / before * 100);
+        const dir = pct > 0.5 ? 'up' : pct < -0.5 ? 'down' : 'flat';
+        const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '—';
+        pricesHtml += `<span class="recap-price-badge ${dir}">${a.id}: ${arrow} ${Math.abs(pct).toFixed(1)}%</span>`;
       });
     }
 
