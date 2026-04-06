@@ -893,10 +893,6 @@
     <div class="holdings-list" id="gs-holdings"></div>
   </div>
 
-  <div class="section-title">Price History</div>
-  <div class="chart-wrap">
-    <canvas id="student-chart"></canvas>
-  </div>
 </div>
 
 <!-- ═══ HOST SCREEN ═══ -->
@@ -908,7 +904,8 @@
     </div>
     <div class="host-controls">
       <div class="timer-display" id="host-timer" style="font-size:24px">—</div>
-      <button class="btn-host btn-start" id="btn-start" onclick="hostStart()">▶ Start Game</button>
+      <button class="btn-host btn-start" id="btn-start" onclick="hostStart()">▶ Start Practice Round</button>
+      <button class="btn-host btn-next hidden" id="btn-practice-end" onclick="hostEndPractice()" style="background:linear-gradient(135deg,#78350f,#f59e0b);color:#fff">End Practice → Round 1</button>
       <button class="btn-host btn-next hidden" id="btn-next" onclick="hostNextRound()">Next Round →</button>
       <button class="btn-host btn-end hidden" id="btn-end" onclick="hostEndGame()">End Game 🏆</button>
     </div>
@@ -956,7 +953,7 @@
           <div class="host-chart-canvas"><canvas id="host-price-chart"></canvas></div>
         </div>
         <div class="host-chart-card">
-          <div class="host-chart-title">Capital Flow This Round (%)</div>
+          <div class="host-chart-title">Capital Flow — Last Round (%)</div>
           <div class="volume-bars" id="host-vol-bars"></div>
         </div>
       </div>
@@ -1003,8 +1000,8 @@ const STARTING_BALANCE = 1000;
 // 1. Create a free project  2. Add a Realtime Database  3. Set rules to public (test mode)
 // 4. Copy your config object here
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyD5l5AQZpDRmn9hS8SuYqy_4WSE_K4wokU",
-  databaseURL: "https://fed-game-default-rtdb.europe-west1.firebasedatabase.app",
+  apiKey: "AIzaSyC6pj7bYXKKzDmE5l3mzGjJqK3v2N8pQwE",
+  databaseURL: "https://fedwatch-classroom-default-rtdb.firebaseio.com",
 };
 
 let _db = null;
@@ -1236,19 +1233,40 @@ async function hostStart() {
   if (Object.keys(state.players).length === 0) {
     showToast('No players joined yet!', 'error'); return;
   }
+  // round 0 = practice, no timer, prices don't change
   state.phase = 'playing';
-  state.round = 1;
-  state.roundStartTime = Date.now();
+  state.round = 0;
+  state.roundStartTime = null;
   state.roundTrades = {};
   await saveState(state);
 
   document.getElementById('host-waiting-view').classList.add('hidden');
   document.getElementById('host-game-view').classList.remove('hidden');
   document.getElementById('btn-start').classList.add('hidden');
+  document.getElementById('btn-practice-end').classList.remove('hidden');
+  renderHostGame(state);
+}
+
+async function hostEndPractice() {
+  let state = await loadState();
+  if (!state) return;
+  // Reset all player holdings — practice doesn't count
+  Object.keys(state.players).forEach(name => {
+    state.players[name].cash = STARTING_BALANCE;
+    state.players[name].holdings = { TECH: 0, BOND: 0, GOLD: 0, OIL: 0 };
+    state.players[name].valueHistory = [STARTING_BALANCE];
+  });
+  state.round = 1;
+  state.roundStartTime = Date.now();
+  state.roundTrades = {};
+  await saveState(state);
+
+  document.getElementById('btn-practice-end').classList.add('hidden');
   document.getElementById('btn-next').classList.remove('hidden');
   document.getElementById('btn-end').classList.remove('hidden');
   renderHostGame(state);
   startHostCountdown(state);
+  showToast('Practice over — Round 1 started!', 'success');
 }
 
 async function hostNextRound() {
@@ -1279,8 +1297,12 @@ async function hostEndGame() {
 // ═══════════════════════════════════════════════════════
 async function resolveRound(state) {
   const round = state.round;
+  if (round === 0) return state; // practice — nothing to resolve
   const roundData = ROUNDS[round - 1];
   const trades = state.roundTrades || {};
+
+  // Save snapshot of trades for capital flow display
+  state.resolvedTrades = { ...trades };
 
   // Calculate total PLN invested per asset this round
   const totalByAsset = {};
@@ -1291,14 +1313,11 @@ async function resolveRound(state) {
   const newPrices = { ...state.prices };
   ASSETS.forEach(a => {
     const share = grandTotal > 0 ? totalByAsset[a.id] / grandTotal : 0.25;
-    // Demand factor: high share = price up, low share = price down
-    const demandMult = 0.85 + (share * 1.2); // range ~0.85 to ~1.05 for equal demand
-    // Fed modifier
+    const demandMult = 0.85 + (share * 1.2);
     const fedMult = roundData.modifiers[a.id];
-    // Random noise ±5%
     const noise = 0.95 + Math.random() * 0.10;
     newPrices[a.id] = Math.round(state.prices[a.id] * demandMult * fedMult * noise);
-    newPrices[a.id] = Math.max(5, newPrices[a.id]); // floor at 5
+    newPrices[a.id] = Math.max(5, newPrices[a.id]);
   });
 
   state.prices = newPrices;
@@ -1357,19 +1376,20 @@ async function executeTrade(type) {
 function renderGameScreen(state) {
   if (!state || state.phase !== 'playing') return;
   const round = state.round;
-  const roundData = ROUNDS[round - 1];
+  const isPractice = round === 0;
+  const roundData = isPractice ? { event: 'This is a practice round — try buying and selling! No timer, prices won\'t change. Your balance resets when the real game starts.' } : ROUNDS[round - 1];
   const p = state.players[myName];
   if (!p) return;
 
-  document.getElementById('gs-round').textContent = `${round} / 5`;
+  document.getElementById('gs-round').textContent = isPractice ? 'PRACTICE' : `${round} / 5`;
   document.getElementById('gs-fed-text').textContent = roundData.event;
+  document.getElementById('gs-timer').textContent = isPractice ? '∞' : '—';
+  document.getElementById('gs-timer-bar').style.width = isPractice ? '100%' : '100%';
+  document.getElementById('gs-timer-bar').style.background = isPractice ? '#f59e0b' : '';
 
   const totalVal = p.cash + ASSETS.reduce((s, a) => s + p.holdings[a.id] * state.prices[a.id], 0);
   document.getElementById('gs-portfolio').textContent = Math.round(totalVal).toLocaleString() + ' PLN';
 
-  // Assets grid
-  const trades = state.roundTrades || {};
-  const grandTotal = ASSETS.reduce((s, a) => s + (trades[a.id] || 0), 0);
   const hist = state.priceHistory;
   const prevPrices = hist && hist.length >= 2 ? hist[hist.length - 2] : null;
 
@@ -1380,7 +1400,6 @@ function renderGameScreen(state) {
     const prev = prevPrices ? prevPrices[a.id] : a.startPrice;
     const pct = ((price - prev) / prev * 100).toFixed(1);
     const up = price >= prev;
-    const share = grandTotal > 0 ? Math.round((trades[a.id] || 0) / grandTotal * 100) : 0;
     const selected = selectedAsset === a.id;
 
     const card = document.createElement('div');
@@ -1392,12 +1411,10 @@ function renderGameScreen(state) {
         <div class="asset-ticker" style="color:${a.color}">${a.id}</div>
         <div>
           <div class="asset-price">${price} PLN</div>
-          <div class="asset-change ${up ? 'up' : 'down'}">${up ? '▲' : '▼'} ${Math.abs(pct)}%</div>
+          <div class="asset-change ${up ? 'up' : 'down'}">${isPractice ? '' : (up ? '▲' : '▼')} ${isPractice ? '' : Math.abs(pct) + '%'}</div>
         </div>
       </div>
       <div class="asset-owned">You own: ${p.holdings[a.id]} units</div>
-      <div class="asset-volume-bar"><div class="asset-volume-fill" style="width:${share}%;background:${a.color}"></div></div>
-      <div class="asset-vol-pct">${share}% of class capital</div>
     `;
     card.onclick = () => selectAsset(a.id, state);
     grid.appendChild(card);
@@ -1423,7 +1440,6 @@ function renderGameScreen(state) {
   });
 
   updateTradePanel(state);
-  updateStudentChart(state);
 }
 
 function selectAsset(id, state) {
@@ -1520,22 +1536,20 @@ function renderHostWaiting(state) {
 
 function renderHostGame(state) {
   const round = state.round;
-  const roundData = ROUNDS[round - 1];
+  const isPractice = round === 0;
+  const roundData = isPractice ? { event: 'Practice round — students are learning the interface. No timer, no price changes. Press "End Practice → Round 1" when ready.' } : ROUNDS[round - 1];
 
-  document.getElementById('host-round-num').textContent = round;
+  document.getElementById('host-round-num').textContent = isPractice ? 'Practice' : round;
   document.getElementById('host-fed-text').textContent = roundData.event;
-  document.getElementById('host-stat-round').textContent = `${round}/5`;
+  document.getElementById('host-stat-round').textContent = isPractice ? 'Practice' : `${round}/5`;
+  document.getElementById('host-stat-timer').textContent = isPractice ? '∞' : '—';
 
   const players = Object.keys(state.players);
   document.getElementById('host-stat-players').textContent = players.length;
-
-  // Count how many traded this round
-  const traded = players.filter(name => {
-    const p = state.players[name];
-    const v = p.cash + ASSETS.reduce((s, a) => s + p.holdings[a.id] * state.prices[a.id], 0);
-    return v !== STARTING_BALANCE || state.round > 1;
+  document.getElementById('host-stat-trading').textContent = players.filter(n => {
+    const p = state.players[n];
+    return ASSETS.some(a => p.holdings[a.id] > 0);
   }).length;
-  document.getElementById('host-stat-trading').textContent = traded;
 
   // Rankings
   const rankings = players.map(name => {
@@ -1559,13 +1573,13 @@ function renderHostGame(state) {
     tbody.appendChild(tr);
   });
 
-  // Volume bars
-  const trades = state.roundTrades || {};
-  const grandTotal = ASSETS.reduce((s, a) => s + (trades[a.id] || 0), 0);
+  // Capital flow bars — only update from resolved priceHistory, not live trades
+  // Show last resolved round's flow, frozen until next round resolves
   const volBars = document.getElementById('host-vol-bars');
   volBars.innerHTML = '';
+  const resolvedTrades = state.resolvedTrades || null; // set during resolveRound
   ASSETS.forEach(a => {
-    const share = grandTotal > 0 ? Math.round((trades[a.id] || 0) / grandTotal * 100) : 0;
+    const share = resolvedTrades ? Math.round((resolvedTrades[a.id] || 0) / Math.max(1, ASSETS.reduce((s,x) => s+(resolvedTrades[x.id]||0),0)) * 100) : 0;
     const div = document.createElement('div');
     div.className = 'vol-bar-item';
     div.innerHTML = `
