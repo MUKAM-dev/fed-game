@@ -1020,7 +1020,6 @@ function initFirebase() {
 
 async function loadState() {
   if (!_db) return null;
-  if (_liveState !== undefined) return _liveState;
   const snap = await _db.ref('gamestate').once('value');
   return snap.val();
 }
