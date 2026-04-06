@@ -846,13 +846,12 @@
       <div class="round-label">Round</div>
       <div class="round-value" id="gs-round">1 / 5</div>
     </div>
-    <div class="timer-display" id="gs-timer">40</div>
     <div class="portfolio-value">
       <div class="pv-label">Portfolio</div>
       <div class="pv-amount" id="gs-portfolio">1,000 PLN</div>
     </div>
   </div>
-  <div class="timer-bar-wrap"><div class="timer-bar" id="gs-timer-bar"></div></div>
+  <div class="timer-bar-wrap" style="display:none"><div class="timer-bar" id="gs-timer-bar"></div></div>
 
   <div class="fed-announcement">
     <div class="fed-ann-label">📡 Fed Announcement</div>
@@ -903,7 +902,6 @@
       <div class="host-subtitle" id="host-status-label">Waiting for players...</div>
     </div>
     <div class="host-controls">
-      <div class="timer-display" id="host-timer" style="font-size:24px">—</div>
       <button class="btn-host btn-start" id="btn-start" onclick="hostStart()">▶ Start Practice Round</button>
       <button class="btn-host btn-next hidden" id="btn-practice-end" onclick="hostEndPractice()" style="background:linear-gradient(135deg,#78350f,#f59e0b);color:#fff">End Practice → Round 1</button>
       <button class="btn-host btn-next hidden" id="btn-next" onclick="hostNextRound()">Next Round →</button>
@@ -938,12 +936,8 @@
           <div class="stat-value" id="host-stat-players">0</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Trading</div>
+          <div class="stat-label">Holding assets</div>
           <div class="stat-value" id="host-stat-trading">0</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Timer</div>
-          <div class="stat-value" id="host-stat-timer" style="color:var(--accent)">40</div>
         </div>
       </div>
 
@@ -1000,8 +994,10 @@ const STARTING_BALANCE = 1000;
 // 1. Create a free project  2. Add a Realtime Database  3. Set rules to public (test mode)
 // 4. Copy your config object here
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyC6pj7bYXKKzDmE5l3mzGjJqK3v2N8pQwE",
-  databaseURL: "https://fedwatch-classroom-default-rtdb.firebaseio.com",
+  apiKey: "AIzaSyD5l5AQZpDRmn9hS8SuYqy_4WSE_K4wokU",
+  authDomain: "fed-game.firebaseapp.com",
+  databaseURL: "https://fed-game-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "fed-game",
 };
 
 let _db = null;
@@ -1104,7 +1100,7 @@ window.addEventListener('load', async () => {
       document.getElementById('btn-next').classList.remove('hidden');
       document.getElementById('btn-end').classList.remove('hidden');
       renderHostGame(state);
-      startHostCountdown(state);
+      
     } else {
       renderHostWaiting(state);
     }
@@ -1125,7 +1121,7 @@ window.addEventListener('load', async () => {
       }
       showScreen('game-screen');
       renderGameScreen(state);
-      if (state.roundStartTime) startStudentCountdown(state.roundStartTime);
+      
     } else if (state.phase === 'waiting') {
       showScreen('waiting-screen');
       renderWaiting(state);
@@ -1217,7 +1213,7 @@ async function joinAsHost() {
     document.getElementById('btn-next').classList.remove('hidden');
     document.getElementById('btn-end').classList.remove('hidden');
     renderHostGame(state);
-    startHostCountdown(state);
+    
   } else {
     renderHostWaiting(state);
   }
@@ -1265,7 +1261,7 @@ async function hostEndPractice() {
   document.getElementById('btn-next').classList.remove('hidden');
   document.getElementById('btn-end').classList.remove('hidden');
   renderHostGame(state);
-  startHostCountdown(state);
+  
   showToast('Practice over — Round 1 started!', 'success');
 }
 
@@ -1280,7 +1276,7 @@ async function hostNextRound() {
   state.roundTrades = state.roundTrades || {};
   await saveState(state);
   renderHostGame(state);
-  startHostCountdown(state);
+  
   initHostPriceChart(state);
 }
 
@@ -1383,9 +1379,9 @@ function renderGameScreen(state) {
 
   document.getElementById('gs-round').textContent = isPractice ? 'PRACTICE' : `${round} / 5`;
   document.getElementById('gs-fed-text').textContent = roundData.event;
-  document.getElementById('gs-timer').textContent = isPractice ? '∞' : '—';
-  document.getElementById('gs-timer-bar').style.width = isPractice ? '100%' : '100%';
-  document.getElementById('gs-timer-bar').style.background = isPractice ? '#f59e0b' : '';
+  
+  
+  
 
   const totalVal = p.cash + ASSETS.reduce((s, a) => s + p.holdings[a.id] * state.prices[a.id], 0);
   document.getElementById('gs-portfolio').textContent = Math.round(totalVal).toLocaleString() + ' PLN';
@@ -1542,7 +1538,7 @@ function renderHostGame(state) {
   document.getElementById('host-round-num').textContent = isPractice ? 'Practice' : round;
   document.getElementById('host-fed-text').textContent = roundData.event;
   document.getElementById('host-stat-round').textContent = isPractice ? 'Practice' : `${round}/5`;
-  document.getElementById('host-stat-timer').textContent = isPractice ? '∞' : '—';
+  
 
   const players = Object.keys(state.players);
   document.getElementById('host-stat-players').textContent = players.length;
@@ -1717,42 +1713,7 @@ function showEndScreen(state) {
 // ═══════════════════════════════════════════════════════
 // TIMER
 // ═══════════════════════════════════════════════════════
-function startHostCountdown(state) {
-  stopCountdown();
-  const startTime = state.roundStartTime || Date.now();
-
-  countdownTimer = setInterval(() => {
-    const elapsed = Math.floor((Date.now() - startTime) / 1000);
-    const remaining = Math.max(0, ROUND_DURATION - elapsed);
-    const pct = remaining / ROUND_DURATION * 100;
-
-    document.getElementById('host-stat-timer').textContent = remaining;
-    document.getElementById('host-timer').textContent = remaining;
-  }, 500);
-}
-
-function startStudentCountdown(startTime) {
-  stopCountdown();
-  countdownTimer = setInterval(() => {
-    const elapsed = Math.floor((Date.now() - startTime) / 1000);
-    const remaining = Math.max(0, ROUND_DURATION - elapsed);
-    const pct = remaining / ROUND_DURATION * 100;
-
-    const timerEl = document.getElementById('gs-timer');
-    const barEl = document.getElementById('gs-timer-bar');
-
-    timerEl.textContent = remaining;
-    timerEl.className = 'timer-display' + (remaining <= 10 ? ' danger' : remaining <= 20 ? ' warning' : '');
-    if (barEl) {
-      barEl.style.width = pct + '%';
-      barEl.className = 'timer-bar' + (remaining <= 10 ? ' danger' : remaining <= 20 ? ' warning' : '');
-    }
-  }, 500);
-}
-
-function stopCountdown() {
-  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
-}
+function stopCountdown() {} // no-op, timer removed
 
 // ═══════════════════════════════════════════════════════
 // POLLING
@@ -1780,11 +1741,11 @@ function startPolling() {
     } else if (state.phase === 'playing') {
       if (document.getElementById('waiting-screen').classList.contains('active')) {
         showScreen('game-screen');
-        if (state.roundStartTime) startStudentCountdown(state.roundStartTime);
+        
       }
       if (lastRoundSeen !== state.round) {
         lastRoundSeen = state.round;
-        if (state.roundStartTime) startStudentCountdown(state.roundStartTime);
+        
       }
       renderGameScreen(state);
     } else if (state.phase === 'ended') {
