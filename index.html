@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Fed Watch — Mini Stock Market</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
 
@@ -992,10 +994,47 @@
 // GAME CONFIGURATION
 // ═══════════════════════════════════════════════════════
 const HOST_PIN = '3123';
-const STORAGE_KEY = 'fedwatch_gamestate_v2';
 const POLL_INTERVAL = 3000;
 const ROUND_DURATION = 40;
 const STARTING_BALANCE = 1000;
+
+// ── Firebase config — uses a public demo DB, fine for classroom use ──
+// !! REPLACE with your own Firebase config from https://console.firebase.google.com !!
+// 1. Create a free project  2. Add a Realtime Database  3. Set rules to public (test mode)
+// 4. Copy your config object here
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyD5l5AQZpDRmn9hS8SuYqy_4WSE_K4wokU",
+  databaseURL: "https://fed-game-default-rtdb.europe-west1.firebasedatabase.app",
+};
+
+let _db = null;
+let _liveState = null;
+let _stateListener = null;
+
+function initFirebase() {
+  try {
+    const app = firebase.initializeApp(FIREBASE_CONFIG);
+    _db = firebase.database();
+    // Live listener — updates _liveState on every change
+    _stateListener = _db.ref('gamestate').on('value', snap => {
+      _liveState = snap.val();
+    });
+  } catch(e) {
+    console.error('Firebase init failed:', e);
+  }
+}
+
+async function loadState() {
+  if (!_db) return null;
+  if (_liveState !== undefined) return _liveState;
+  const snap = await _db.ref('gamestate').once('value');
+  return snap.val();
+}
+
+async function saveState(state) {
+  if (!_db) return;
+  await _db.ref('gamestate').set(state);
+}
 
 const ASSETS = [
   { id: 'TECH', name: 'TechBoom Inc', color: '#3b82f6', rgb: '59,130,246', startPrice: 50 },
@@ -1045,21 +1084,60 @@ let pollTimer = null;
 let countdownTimer = null;
 let lastRoundSeen = -1;
 
-// ═══════════════════════════════════════════════════════
-// STORAGE HELPERS
-// ═══════════════════════════════════════════════════════
-async function loadState() {
-  try {
-    const r = await window.storage.get(STORAGE_KEY, true);
-    return r ? JSON.parse(r.value) : null;
-  } catch { return null; }
-}
+// ── Auto-rejoin on refresh ──
+window.addEventListener('load', async () => {
+  initFirebase();
+  // Give Firebase a moment to connect
+  await new Promise(r => setTimeout(r, 800));
 
-async function saveState(state) {
-  try {
-    await window.storage.set(STORAGE_KEY, JSON.stringify(state), true);
-  } catch(e) { console.error('save failed', e); }
-}
+  const savedName = localStorage.getItem('fedwatch_name');
+  const savedHost = localStorage.getItem('fedwatch_host');
+
+  if (savedHost === '1') {
+    isHost = true;
+    myName = '__host__';
+    const state = await loadState();
+    if (!state) return;
+    showScreen('host-screen');
+    if (state.phase === 'ended') { showEndScreen(state); return; }
+    if (state.phase === 'playing') {
+      document.getElementById('host-waiting-view').classList.add('hidden');
+      document.getElementById('host-game-view').classList.remove('hidden');
+      document.getElementById('btn-start').classList.add('hidden');
+      document.getElementById('btn-next').classList.remove('hidden');
+      document.getElementById('btn-end').classList.remove('hidden');
+      renderHostGame(state);
+      startHostCountdown(state);
+    } else {
+      renderHostWaiting(state);
+    }
+    startPolling();
+    return;
+  }
+
+  if (savedName) {
+    myName = savedName;
+    const state = await loadState();
+    if (!state) return;
+    if (state.phase === 'ended') { showEndScreen(state); return; }
+    if (state.phase === 'playing') {
+      // Make sure player still exists
+      if (!state.players[myName]) {
+        state.players[myName] = { cash: STARTING_BALANCE, holdings: { TECH: 0, BOND: 0, GOLD: 0, OIL: 0 }, valueHistory: [STARTING_BALANCE] };
+        await saveState(state);
+      }
+      showScreen('game-screen');
+      renderGameScreen(state);
+      if (state.roundStartTime) startStudentCountdown(state.roundStartTime);
+    } else if (state.phase === 'waiting') {
+      showScreen('waiting-screen');
+      renderWaiting(state);
+    }
+    startPolling();
+  }
+});
+
+
 
 function makeInitialState() {
   const prices = {};
@@ -1087,6 +1165,8 @@ async function joinGame() {
   if (!name) { showToast('Please enter your name', 'error'); return; }
   myName = name;
   isHost = false;
+  localStorage.setItem('fedwatch_name', myName);
+  localStorage.removeItem('fedwatch_host');
 
   let state = await loadState();
   if (!state) state = makeInitialState();
@@ -1121,6 +1201,8 @@ async function joinAsHost() {
   if (pin !== HOST_PIN) { showToast('Wrong PIN', 'error'); return; }
   isHost = true;
   myName = '__host__';
+  localStorage.setItem('fedwatch_host', '1');
+  localStorage.removeItem('fedwatch_name');
 
   let state = await loadState();
   if (!state) state = makeInitialState();
@@ -1664,12 +1746,16 @@ function stopCountdown() {
 function startPolling() {
   stopPolling();
   pollTimer = setInterval(async () => {
-    const state = await loadState();
+    const state = _liveState; // use live listener value directly
     if (!state) return;
 
     if (isHost) {
       if (state.phase === 'waiting') renderHostWaiting(state);
-      else if (state.phase === 'playing') renderHostGame(state);
+      else if (state.phase === 'playing') {
+        document.getElementById('host-waiting-view').classList.add('hidden');
+        document.getElementById('host-game-view').classList.remove('hidden');
+        renderHostGame(state);
+      }
       else if (state.phase === 'ended') showEndScreen(state);
       return;
     }
