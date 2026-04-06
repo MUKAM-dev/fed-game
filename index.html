@@ -906,6 +906,7 @@
       <button class="btn-host btn-next hidden" id="btn-practice-end" onclick="hostEndPractice()" style="background:linear-gradient(135deg,#78350f,#f59e0b);color:#fff">End Practice → Round 1</button>
       <button class="btn-host btn-next hidden" id="btn-next" onclick="hostNextRound()">Next Round →</button>
       <button class="btn-host btn-end hidden" id="btn-end" onclick="hostEndGame()">End Game 🏆</button>
+      <button class="btn-host" id="btn-restart" onclick="hostRestart()" style="background:var(--bg3);border:1px solid var(--border2);color:var(--muted)" title="Restart game — all players sent back to waiting screen">↺ Restart</button>
     </div>
   </div>
 
@@ -1076,12 +1077,16 @@ let hostPriceChart = null;
 let pollTimer = null;
 let countdownTimer = null;
 let lastRoundSeen = -1;
+let lastRestartToken = null;
 
 // ── Auto-rejoin on refresh ──
 window.addEventListener('load', async () => {
   initFirebase();
   // Give Firebase a moment to connect
   await new Promise(r => setTimeout(r, 800));
+  // Snapshot current restart token so we don't falsely redirect on first load
+  const initState = await loadState();
+  if (initState) lastRestartToken = initState.restartToken || null;
 
   const savedName = localStorage.getItem('fedwatch_name');
   const savedHost = localStorage.getItem('fedwatch_host');
@@ -1288,6 +1293,29 @@ async function hostEndGame() {
   showEndScreen(state);
 }
 
+async function hostRestart() {
+  if (!confirm('Restart the game? All player data will be cleared and everyone sent back to the waiting screen.')) return;
+  const fresh = makeInitialState();
+  // Add a restart token so students know to re-register
+  fresh.restartToken = Date.now();
+  await saveState(fresh);
+
+  // Reset host UI back to waiting view
+  document.getElementById('host-waiting-view').classList.remove('hidden');
+  document.getElementById('host-game-view').classList.add('hidden');
+  document.getElementById('btn-start').classList.remove('hidden');
+  document.getElementById('btn-practice-end').classList.add('hidden');
+  document.getElementById('btn-next').classList.add('hidden');
+  document.getElementById('btn-end').classList.add('hidden');
+  document.getElementById('host-status-label').textContent = 'Waiting for players...';
+  document.getElementById('host-wait-count').textContent = '0';
+  document.getElementById('host-players-grid').innerHTML = '';
+
+  // If we were on the end screen, go back to host screen
+  showScreen('host-screen');
+  showToast('Game restarted — students redirected to waiting screen', 'success');
+}
+
 // ═══════════════════════════════════════════════════════
 // ROUND RESOLUTION — price movement
 // ═══════════════════════════════════════════════════════
@@ -1373,7 +1401,7 @@ function renderGameScreen(state) {
   if (!state || state.phase !== 'playing') return;
   const round = state.round;
   const isPractice = round === 0;
-  const roundData = isPractice ? { event: 'This is a practice round — try buying and selling! No timer, prices won\'t change. Your balance resets when the real game starts.' } : ROUNDS[round - 1];
+  const roundData = isPractice ? { event: '👋 Welcome! This is a demo round — no timer, no consequences. Try tapping an asset below, set a quantity, and press BUY. Then try SELL. Your balance resets to 1,000 PLN when the real game starts.' } : ROUNDS[round - 1];
   const p = state.players[myName];
   if (!p) return;
 
@@ -1533,7 +1561,7 @@ function renderHostWaiting(state) {
 function renderHostGame(state) {
   const round = state.round;
   const isPractice = round === 0;
-  const roundData = isPractice ? { event: 'Practice round — students are learning the interface. No timer, no price changes. Press "End Practice → Round 1" when ready.' } : ROUNDS[round - 1];
+  const roundData = isPractice ? { event: '🎓 DEMO MODE — Walk students through the interface. Point out: (1) the Fed announcement at the top — this is your signal each round. (2) The 4 assets — tap one to select it. (3) Use +/− to set quantity, then BUY or SELL. (4) Portfolio shows your cash + holdings below. Press "End Practice → Round 1" when everyone is ready.' } : ROUNDS[round - 1];
 
   document.getElementById('host-round-num').textContent = isPractice ? 'Practice' : round;
   document.getElementById('host-fed-text').textContent = roundData.event;
@@ -1736,7 +1764,27 @@ function startPolling() {
     }
 
     // Student
+    // Detect restart — send back to join screen so they re-enter name
+    if (state.restartToken && state.restartToken !== lastRestartToken) {
+      if (lastRestartToken !== null) {
+        // A restart happened after we joined — clear and go to join screen
+        lastRestartToken = state.restartToken;
+        myName = '';
+        localStorage.removeItem('fedwatch_name');
+        stopPolling();
+        stopCountdown();
+        showScreen('join-screen');
+        showToast('Game was restarted — please enter your name again', '');
+        return;
+      }
+      lastRestartToken = state.restartToken;
+    }
+
     if (state.phase === 'waiting') {
+      // If student was in game/end screen and game was restarted, send them back to waiting
+      if (!document.getElementById('waiting-screen').classList.contains('active')) {
+        showScreen('waiting-screen');
+      }
       renderWaiting(state);
     } else if (state.phase === 'playing') {
       if (document.getElementById('waiting-screen').classList.contains('active')) {
