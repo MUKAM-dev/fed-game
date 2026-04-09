@@ -1040,27 +1040,27 @@ const ROUNDS = [
   {
     event: 'Fed holds rates steady — no surprises',
     explanation: 'When the Fed stays put, markets breathe easy. No rate change means borrowing costs stay the same, so companies can keep investing. Stable expectations led to mild gains across the board — especially for growth stocks like TECH. Students who held cash missed out on a calm, predictable rally.',
-    modifiers: { TECH: 1.08, BOND: 1.02, GOLD: 0.98, OIL: 1.03 },
+    modifiers: { TECH: 1.05, BOND: 1.02, GOLD: 0.99, OIL: 1.03 },
   },
   {
     event: 'Surprise rate hike: Fed raises by 0.5% to fight inflation',
     explanation: 'Higher interest rates mean more expensive loans for companies. Growth stocks like TECH — which rely on cheap credit to fund future profits — got hit hardest. BOND rose because new bonds now pay higher yields, making existing safe assets more attractive. This mirrors exactly what happened in 2022 when the Fed hiked aggressively.',
-    modifiers: { TECH: 0.82, BOND: 1.12, GOLD: 1.05, OIL: 0.93 },
+    modifiers: { TECH: 0.88, BOND: 1.07, GOLD: 1.04, OIL: 0.93 },
   },
   {
     event: 'Fed signals upcoming rate cuts — "inflation under control"',
     explanation: 'Cheap money is coming! When rates fall, companies can borrow cheaply again — great for growth stocks. TECH surged as investors priced in future profits. BOND fell because lower rates mean lower yields on new bonds. GOLD dipped slightly since low inflation reduces its safe-haven appeal. Students who bought TECH here made the "textbook" move.',
-    modifiers: { TECH: 1.18, BOND: 0.90, GOLD: 0.96, OIL: 1.08 },
+    modifiers: { TECH: 1.09, BOND: 0.94, GOLD: 0.97, OIL: 1.05 },
   },
   {
     event: 'Shock inflation data: CPI hits 6.5% — far above expectations',
     explanation: 'Unexpected inflation creates uncertainty. Gold is a classic inflation hedge — it holds its value when currencies lose purchasing power, so it spiked. Oil also rose since commodity prices often drive inflation. TECH sold off because investors feared the Fed would hike again. BOND fell for the same reason. Herding into GOLD here was the rational move.',
-    modifiers: { TECH: 0.88, BOND: 0.86, GOLD: 1.20, OIL: 1.15 },
+    modifiers: { TECH: 0.91, BOND: 0.90, GOLD: 1.10, OIL: 1.08 },
   },
   {
     event: 'Emergency Fed meeting — markets in panic mode',
     explanation: 'Panic is its own force in markets. When the Fed calls an emergency meeting, investors assume something is seriously wrong. The initial reaction is usually sell everything. But here\'s the lesson: whoever kept a cool head and stayed in quality assets (BOND, GOLD) was rewarded when calm returned. Emotional decision-making is one of the biggest enemies of good investing.',
-    modifiers: { TECH: 0.92, BOND: 1.08, GOLD: 1.10, OIL: 0.85 },
+    modifiers: { TECH: 0.93, BOND: 1.06, GOLD: 1.08, OIL: 0.88 },
   },
 ];
 
@@ -1329,12 +1329,16 @@ async function resolveRound(state) {
 
   const newPrices = { ...state.prices };
   ASSETS.forEach(a => {
-    // Fed modifier is the dominant force (80-90% of movement)
     const fedMult = roundData.modifiers[a.id];
-    // Small random noise ±4% — markets are never perfectly predictable
-    const noise = 0.96 + Math.random() * 0.08;
-    newPrices[a.id] = Math.round(state.prices[a.id] * fedMult * noise);
-    newPrices[a.id] = Math.max(5, newPrices[a.id]);
+    // Tight noise ±2%
+    const noise = 0.98 + Math.random() * 0.04;
+    let newPrice = Math.round(state.prices[a.id] * fedMult * noise);
+    // Hard cap: max ±12% move per round for realism
+    const maxMove = state.prices[a.id] * 0.12;
+    newPrice = Math.min(newPrice, state.prices[a.id] + maxMove);
+    newPrice = Math.max(newPrice, state.prices[a.id] - maxMove);
+    newPrice = Math.max(5, Math.round(newPrice));
+    newPrices[a.id] = newPrice;
   });
 
   state.prices = newPrices;
